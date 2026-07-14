@@ -29,7 +29,6 @@ Verify token: نفس `VERIFY_TOKEN`
 Subscribe: `messages`
 
 ## أمان
-<<<<<<< HEAD
 المفتاح الخاص ظهر في صور المحادثة. احذف المفتاح القديم من Google Cloud وأنشئ مفتاحا جديدا، ثم حدّث `GOOGLE_PRIVATE_KEY` في Render. (تأكد أن هذا صار فعلا قبل ما تنشر الكود.)
 
 أضف `APP_SECRET` (App Secret ديال Meta) باش السيرفر يتحقق أن كل طلب جاي فعلا من واتساب (توقيع `X-Hub-Signature-256`). بدون هذا المتغير، أي حد عندو رابط الـ webhook يقدر يبعث رسائل وهمية.
@@ -40,6 +39,3 @@ Subscribe: `messages`
 
 ## بنية الكود
 الكود ولا مقسم على عدة ملفات صغيرة تحت `src/` (config, store, sheetsClient, ai, whatsapp, retry, utils) باش يبقى كل جزء واضح ومنفصل، و`server.js` يبقى غير نقطة التجميع والـ routes.
-=======
-المفتاح الخاص ظهر في صور المحادثة. احذف المفتاح القديم من Google Cloud وأنشئ مفتاحا جديدا، ثم حدّث `GOOGLE_PRIVATE_KEY` في Render.
->>>>>>> 8138dc493662529a0c00910e047c31398ffbe85b

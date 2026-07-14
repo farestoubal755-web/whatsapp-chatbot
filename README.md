@@ -7,7 +7,6 @@ Render settings:
 - Webhook URL: `https://YOUR-RENDER-DOMAIN/webhook`
 
 Add the variables from `.env.example` in Render. Never upload real tokens to GitHub.
-<<<<<<< HEAD
 
 ## Structure
 - `server.js` - Express app, webhook routes, per-conversation orchestration.
@@ -24,5 +23,3 @@ Set `APP_SECRET` (your Meta App Secret) so the bot verifies the `X-Hub-Signature
 ## New optional settings
 - `ADMIN_PHONE` - WhatsApp number notified when a conversation is handed off to a human.
 - `SESSION_TTL_HOURS` - idle time after which a customer's next message starts a fresh conversation (default 12h).
-=======
->>>>>>> 8138dc493662529a0c00910e047c31398ffbe85b
