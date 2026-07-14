@@ -1,0 +1,21 @@
+{
+  "name": "dar-laffaire-whatsapp-bot",
+<<<<<<< HEAD
+  "version": "2.1.0",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check server.js && node --check src/config.js && node --check src/utils.js && node --check src/retry.js && node --check src/sheetsClient.js && node --check src/store.js && node --check src/ai.js && node --check src/whatsapp.js"
+  },
+  "engines": {"node": ">=20"},
+  "dependencies": {"dotenv":"^16.4.5","express":"^5.1.0","googleapis":"^156.0.0","openai":"^5.10.1"}
+=======
+  "version": "2.0.0",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {"start":"node server.js","check":"node --check server.js"},
+  "engines": {"node": ">=20"},
+  "dependencies": {"express":"^5.1.0","googleapis":"^156.0.0","openai":"^5.10.1"}
+>>>>>>> 8138dc493662529a0c00910e047c31398ffbe85b
+}
