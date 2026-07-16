@@ -1,14 +1,12 @@
 import { cfg } from "./config.js";
 import { getValues, updateValues, appendValues, ensureTab } from "./sheetsClient.js";
 import { normalize, pick, toNumber, colLetter, editDistanceWithin } from "./utils.js";
+import { ORDER_HEADERS } from "./persistence/orderSheetSchema.js";
+
+export { ORDER_HEADERS };
 
 const PRODUCT_CACHE_TTL_MS = 20_000;
 const SHIPPING_CACHE_TTL_MS = 20_000;
-
-export const ORDER_HEADERS = [
-  "created_at","order_id","customer_name","phone","wilaya","commune","delivery_type",
-  "product","color","size","quantity","unit_price","shipping_price","total","status","source","notes",
-];
 
 // "history" is a new trailing column - ensureTab() will add it to an
 // existing SESSIONS sheet without disturbing the columns already there.
@@ -207,7 +205,7 @@ export async function createOrder(session, product, shippingPrice) {
   const row = [
     new Date().toISOString(), id, session.customer_name, session.phone, session.wilaya, session.commune,
     session.delivery_type, product.product, session.color || product.color, session.size || product.size,
-    quantity, product.price, shippingPrice, total, "NEW", "WhatsApp Bot", "",
+    quantity, product.price, shippingPrice, total, "NEW", "WhatsApp Bot", "", "",
   ];
   await appendValues(`'${cfg.sheets.orders}'!A:${colLetter(ORDER_HEADERS.length)}`, [row]);
   return { id, total };

@@ -1,14 +1,43 @@
 import express from "express";
+import pg from "pg";
 import { cfg } from "./src/config.js";
 import { initStore, searchProducts, getShippingRate, getSession, saveSession, resetProductContext, createOrder } from "./src/store.js";
+import { getValues, appendValues } from "./src/sheetsClient.js";
 import { ai } from "./src/ai.js";
 import { sendText, verifyWebhookSignature, parseIncoming } from "./src/whatsapp.js";
+import { createSandboxOrderPilot, createConfirmedOrderWithPilot } from "./src/pilot/sandboxOrderPilot.js";
+
+const { Pool } = pg;
+
+const sandboxPilotLogger = Object.freeze({
+  log() { console.log("[sandbox order pilot] operation completed; details redacted"); },
+  warn() { console.warn("[sandbox order pilot] warning; details redacted"); },
+  error() { console.error("[sandbox order pilot] error; details redacted"); },
+});
+
+const sandboxOrderPilot = createSandboxOrderPilot({
+  enabled: cfg.sandboxOrderPilot.enabled,
+  phoneAllowlistRaw: cfg.sandboxOrderPilot.phoneAllowlistRaw,
+  databaseUrl: cfg.databaseUrl,
+  appSecret: cfg.appSecret,
+  createPool: (options) => new Pool(options),
+  getValuesFn: getValues,
+  appendValuesFn: appendValues,
+  ordersTab: cfg.sheets.orders,
+  logger: sandboxPilotLogger,
+});
 
 const app = express();
 app.use(express.json({ limit: "2mb", verify: (req, _res, buf) => { req.rawBody = buf; } }));
 
 const HISTORY_TURNS = 8;
 const MANAGED_FIELDS = ["customer_name", "wilaya", "commune", "delivery_type", "product", "color", "size", "quantity", "stage"];
+
+function safeErrorMetadata(error) {
+  const safeNames = new Set(["Error", "TypeError", "RangeError", "SyntaxError", "ReferenceError", "AggregateError"]);
+  const errorName = safeNames.has(error?.name) ? error.name : "Error";
+  return { errorName, errorCode: "REDACTED" };
+}
 
 // Serializes processing per phone number so two messages arriving close
 // together can't both read the session before either writes it back
@@ -49,13 +78,13 @@ function pushHistory(session, userText, botReply) {
 
 async function notifyAdmin(phone, text) {
   if (!cfg.adminPhone) {
-    console.warn(`[handoff] No ADMIN_PHONE configured. Customer ${phone} needs human follow-up: "${text}"`);
+    console.warn("[handoff] manual follow-up required; customer data redacted");
     return;
   }
   await sendText(cfg.adminPhone, `تنبيه: الزبون ${phone} يحتاج متابعة يدوية.\nآخر رسالة: ${text}`);
 }
 
-async function handleConfirmOrder(session) {
+async function handleConfirmOrder(session, messageId) {
   const query = [session.product, session.color, session.size].filter(Boolean).join(" ");
   const products = await searchProducts(query);
   const product = products[0];
@@ -76,13 +105,21 @@ async function handleConfirmOrder(session) {
     return `باش نثبت الطلب نحتاج: ${missing.join("، ")}.`;
   }
 
-  const order = await createOrder(session, product, shipping.selected);
+  const { order } = await createConfirmedOrderWithPilot({
+    pilot: sandboxOrderPilot,
+    phone: session.phone,
+    messageId,
+    session,
+    product,
+    shippingPrice: shipping.selected,
+    createLegacyOrderFn: createOrder,
+  });
   resetProductContext(session); // clear product/order fields, keep the reusable customer profile
   session.stage = "ordered";
   return `تم تسجيل طلبك ✅\nرقم الطلب: ${order.id}\nالمجموع: ${order.total} ${cfg.currency}\nنتصلو بيك للتأكيد.`;
 }
 
-async function handle(phone, text) {
+async function handle(phone, text, messageId) {
   const session = await getSession(phone);
   session.last_message = text;
 
@@ -102,9 +139,11 @@ async function handle(phone, text) {
     mergeUpdates(session, followUp.updates);
     replyText = followUp.reply;
   } else if (decision.action === "confirm_order") {
-    replyText = await handleConfirmOrder(session);
+    replyText = await handleConfirmOrder(session, messageId);
   } else if (decision.action === "handoff") {
-    await notifyAdmin(phone, text).catch((e) => console.error("[admin notify] failed:", e.message));
+    await notifyAdmin(phone, text).catch((error) =>
+      console.error("[admin notify] failed", safeErrorMetadata(error))
+    );
   }
 
   pushHistory(session, text, replyText);
@@ -117,11 +156,11 @@ async function handleUnsupported(phone) {
 }
 
 async function handleFailure(phone, error) {
-  console.error(`[handle] error for ${phone}:`, error.message);
+  console.error("[handle] processing failed", safeErrorMetadata(error));
   try {
     await sendText(phone, "صرا خطأ تقني عندنا، حاولو عاودو بعد شوية أو تواصلو معانا مباشرة 🙏");
   } catch (sendError) {
-    console.error(`[handle] failed to notify ${phone} about the error:`, sendError.message);
+    console.error("[handle] failure notification failed", safeErrorMetadata(sendError));
   }
 }
 
@@ -141,14 +180,31 @@ app.post("/webhook", verifyWebhookSignature(cfg.appSecret), (req, res) => {
   if (!incoming || alreadyProcessed(incoming.id)) return;
 
   const task = incoming.supported
-    ? () => handle(incoming.phone, incoming.text).catch((e) => handleFailure(incoming.phone, e))
-    : () => handleUnsupported(incoming.phone).catch((e) => console.error("[unsupported] failed:", e.message));
+    ? () => handle(incoming.phone, incoming.text, incoming.id).catch((e) => handleFailure(incoming.phone, e))
+    : () => handleUnsupported(incoming.phone).catch((error) =>
+      console.error("[unsupported] response failed", safeErrorMetadata(error))
+    );
 
   withPhoneQueue(incoming.phone, task);
 });
 
 initStore()
   .then(() => console.log("Google Sheets ready"))
-  .catch((e) => console.error("Google Sheets init failed:", e.message));
+  .catch((error) => console.error("[sheets init] failed", safeErrorMetadata(error)));
 
-app.listen(cfg.port, "0.0.0.0", () => console.log(`Server listening on port ${cfg.port}`));
+const httpServer = app.listen(cfg.port, "0.0.0.0", () => console.log(`Server listening on port ${cfg.port}`));
+
+let shutdownStarted = false;
+async function shutdown() {
+  if (shutdownStarted) return;
+  shutdownStarted = true;
+  httpServer.close();
+  try {
+    await sandboxOrderPilot.close();
+  } catch (error) {
+    console.error("[shutdown] sandbox order pilot Pool close failed", safeErrorMetadata(error));
+  }
+}
+
+process.once("SIGTERM", () => { void shutdown(); });
+process.once("SIGINT", () => { void shutdown(); });

@@ -25,6 +25,7 @@ export const cfg = {
   phoneNumberId: process.env.PHONE_NUMBER_ID,
   graphVersion: process.env.GRAPH_API_VERSION || "v23.0",
   appSecret: process.env.APP_SECRET || "",
+  databaseUrl: process.env.DATABASE_URL || "",
   adminPhone: process.env.ADMIN_PHONE || "",
   sessionTtlHours: Number(process.env.SESSION_TTL_HOURS || 12),
   storeName: process.env.STORE_NAME || "DAR LAFFAIRE",
@@ -45,5 +46,9 @@ export const cfg = {
     shipping: process.env.SHIPPING_SHEET || "SHIPPING",
     orders: process.env.ORDERS_SHEET || "ORDERS",
     sessions: process.env.SESSIONS_SHEET || "SESSIONS",
+  },
+  sandboxOrderPilot: {
+    enabled: process.env.SANDBOX_ORDER_PILOT_ENABLED === "true",
+    phoneAllowlistRaw: process.env.SANDBOX_ORDER_PILOT_PHONE_ALLOWLIST || "",
   },
 };
