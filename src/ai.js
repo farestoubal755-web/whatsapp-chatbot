@@ -69,3 +69,87 @@ export async function ai(message, session, { products = [], shipping = null } = 
     { retries: 2, label: "openai.responses.create" }
   );
 }
+
+// ---------------------------------------------------------------------------
+// AI Understanding Layer (DASP-004 SS4.1, Sprint-1 Task 2).
+//
+// This is a NEW, separate function - added alongside `ai()` above, not a
+// replacement for it. `ai()` still has its original {reply, action,
+// search_query, updates} contract and server.js still calls it unmodified;
+// nothing currently wires `understand()` into the running message-handling
+// path. That wiring (via the Deterministic Business Router and the Legacy
+// Adapter) is later-task work, per DASP-004 SS4.3's phased migration and the
+// Sprint-1 Brief's explicit "without removing any working feature" goal.
+//
+// Per DASP-004 SS4.1's Rule, this layer's output is ONLY {intent, entities,
+// confidence} - it never outputs a reply, an action, a price, a stock
+// status, or any other business/commercial decision.
+//
+// IMPORTANT (see BACKLOG.md, "Confidence concepts" entry): `confidence`
+// here is AI LINGUISTIC confidence only - how clearly this layer understood
+// the customer's wording. It is NOT, and must never be used as, a
+// data-grounded product/variant match confidence. This layer has no Sheets
+// access (DASP-004 SS2 Rule) and cannot know whether a product/variant
+// actually exists or how many real candidates match it.
+// ---------------------------------------------------------------------------
+
+const INTENTS = [
+  "product_inquiry", "variant_inquiry", "delivery_inquiry",
+  "order_initiate", "order_info_provide", "order_confirm",
+  "order_modify", "order_cancel", "general_question",
+  "complaint", "greeting", "unknown",
+];
+
+const understandingSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    intent: { type: "string", enum: INTENTS },
+    entities: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        productDescription: { type: "string" },
+        color: { type: "string" },
+        size: { type: "string" },
+        wilaya: { type: "string" },
+        commune: { type: "string" },
+        customerName: { type: "string" },
+        phone: { type: "string" },
+        deliveryType: { type: "string" },
+        quantity: { type: "integer" },
+      },
+      required: ["productDescription", "color", "size", "wilaya", "commune", "customerName", "phone", "deliveryType", "quantity"],
+    },
+    confidence: { type: "string", enum: ["high", "medium", "low"] },
+  },
+  required: ["intent", "entities", "confidence"],
+};
+
+const understandingInstructions = `أنت طبقة فهم لغة فقط لمتجر ${cfg.storeName}. مهمتك الوحيدة: تصنيف نية الزبونة، واستخراج المعلومات المذكورة صراحة في رسالتها الحالية، وتقييم مدى وضوح فهمك لهذه الرسالة لغويا. ممنوع عليك: صياغة رد للزبونة، اتخاذ أي قرار تجاري، اختراع سعر أو مقاس أو لون أو توفر منتج، أو افتراض أي معلومة لم تُذكر صراحة.
+
+صنّف النية إلى واحدة فقط من هذه القائمة المغلقة: ${INTENTS.join(", ")}. إذا لم تتطابق الرسالة بوضوح مع أي نية من القائمة، اختر unknown - لا تفرض تصنيفا تقريبيا أبدا.
+
+استخرج فقط ما ذُكر صراحة في الرسالة الحالية؛ اترك أي حقل فارغا "" (أو 0 للكمية) إذا لم يُذكر، ولا تكمّله من معرفتك العامة أو من محادثات سابقة.
+
+confidence يعكس فقط مدى وضوح فهمك اللغوي لهذه الرسالة (هل النية والمعلومات المذكورة واضحة أم غامضة/ناقصة) - وليس تقييما لمدى توفر منتج أو صحة سعر أو عدد المطابقات الحقيقية في المتجر، لأنك لا تملك أي وصول لبيانات المتجر الفعلية.`;
+
+export async function understand(message, context = {}) {
+  const input = [
+    `رسالة الزبون: ${message}`,
+    `سياق مختصر: ${JSON.stringify(context)}`,
+  ].join("\n");
+
+  return withRetry(
+    async () => {
+      const r = await openai.responses.create({
+        model: cfg.openai.model,
+        instructions: understandingInstructions,
+        input,
+        text: { format: { type: "json_schema", name: "message_understanding", strict: true, schema: understandingSchema } },
+      });
+      return JSON.parse(r.output_text);
+    },
+    { retries: 2, label: "openai.responses.create (understand)" }
+  );
+}
